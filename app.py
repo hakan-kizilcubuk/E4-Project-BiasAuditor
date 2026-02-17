@@ -58,10 +58,10 @@ styles = {
 # LAYOUT PRINCIPAL
 app.layout = html.Div([
     dcc.Location(id='url', refresh=False),
-    
-    # Stockage des données (JSON)
     dcc.Store(id='df_real_store', storage_type='memory'),
     dcc.Store(id='df_gen_store', storage_type='memory'),
+    # Nouveau Store pour stocker la liste des colonnes sélectionnées
+    dcc.Store(id='selected-columns-store', storage_type='memory'),
     
     html.Div(id='nav-container'),
     html.Div(id='page-content')
@@ -104,12 +104,79 @@ def render_index():
                     html.Div(style=styles['label_underline'], children=[html.B("Fichier générer", style={'color': BLEU_FONCE, 'fontSize': '20px'})]),
                     dcc.Upload(id='upload-genere', children=html.Div(id='content-genere'), style={**styles['upload_box'], 'backgroundColor': BLEU_FONCE}),
                 ]), width=6),
-            ], style={'marginTop': '220px'}),
+            ], style={'marginTop': '150px'}),
+
+            # --- SECTION CASES À COCHER EN ROSE ---
+            dbc.Row([
+                dbc.Col([
+                    html.Div(id='checklist-container', style={'marginTop': '30px', 'textAlign': 'center'}, children=[
+                        # Texte au-dessus des cases en Rose
+                        html.P("Sélectionnez les colonnes à inclure :", 
+                               style={'fontWeight': 'bold', 'color': ROSE_LOGO, 'fontSize': '18px'}),
+                        
+                        # Labels des cases à cocher en Rose
+                        dcc.Checklist(
+                            id='column-checklist',
+                            options=[],
+                            value=[],
+                            inline=True,
+                            inputStyle={"margin-right": "10px", "margin-left": "20px"},
+                            style={'color': ROSE_LOGO, 'fontSize': '16px'} # Application de la couleur ici
+                        )
+                    ])
+                ], width=12)
+            ]),
+            # ---------------------------------------
+
             dbc.Row(dbc.Col(html.Div([
-                dcc.Link(html.Button("Suivant", style={'backgroundColor': ROSE_LOGO, 'color': 'white', 'border': 'none', 'borderRadius': '10px', 'padding': '12px 60px', 'fontSize': '20px', 'marginTop': '80px'}), href="/graphique")
+                dcc.Link(html.Button("Suivant", style={'backgroundColor': ROSE_LOGO, 'color': 'white', 'border': 'none', 'borderRadius': '10px', 'padding': '12px 60px', 'fontSize': '20px', 'marginTop': '40px'}), href="/graphique")
             ], style={'textAlign': 'center'}), width=12))
         ], fluid=True)
     ])
+
+
+@app.callback(
+    [Output('column-checklist', 'options'),
+     Output('column-checklist', 'value')],
+    [Input('df_real_store', 'data')]
+)
+
+def update_checklist_options(data_reel):
+    if not data_reel:
+        return [], []
+    
+    df = pd.DataFrame(data_reel)
+    cols = df.columns.tolist()
+    
+    # Création des options avec l'option "Aucun"
+    options = [{'label': ' Aucun', 'value': 'none'}] + \
+              [{'label': f' {c}', 'value': c} for c in cols]
+    
+    # Par défaut, on sélectionne tout sauf 'none'
+    return options, cols
+
+# CALLBACK POUR GÉRER LA LOGIQUE "AUCUN" ET RENVOYER LA LISTE
+@app.callback(
+    Output('selected-columns-store', 'data'),
+    Input('column-checklist', 'value'),
+    prevent_initial_call=True
+)
+
+
+
+def handle_checklist_logic(selected_values):
+    if not selected_values:
+        return []
+    
+    # Si "Aucun" vient d'être coché ou est présent
+    if 'none' in selected_values:
+        # Si on a plusieurs valeurs et que l'une est 'none', on vide le reste
+        # (Logique : si on clique Aucun, ça désélectionne tout)
+        return []
+    
+    return selected_values
+
+
 
 def render_graph_page():
     return html.Div(style={'padding': '40px', 'backgroundColor': '#f8f9fa', 'minHeight': '100vh'}, children=[
@@ -240,18 +307,24 @@ def download_report_callback(n_clicks, data_reel, data_genere):
     [Output('graph-biais-unique', 'figure'),
      Output('dropdown-colonne', 'options'),
      Output('dropdown-colonne', 'value')],
-    [Input('df_real_store', 'data'),
-     Input('df_gen_store', 'data'),
-     Input('dropdown-colonne', 'value')]
+    [Input('df_real_store', 'data'),           # correspond à data_reel
+     Input('df_gen_store', 'data'),            # correspond à data_genere
+     Input('dropdown-colonne', 'value'),       # correspond à selected_col
+     Input('selected-columns-store', 'data')]  # correspond à selected_values
 )
-def update_analysis(data_reel, data_genere, selected_col):
+
+
+def update_analysis(data_reel, data_genere, selected_col, selected_values):
     # Initialisation par défaut
     fig = px.scatter(title="Veuillez charger les deux fichiers (Réel et Généré)")
     options = []
 
     if not data_reel or not data_genere:
         return fig, options, None
-
+    
+    if not selected_values:
+        return px.scatter(title="Aucune colonne sélectionnée"), [], None
+    
     # Conversion en DataFrames
     Data_real = pd.DataFrame(data_reel)
     Data_gen = pd.DataFrame(data_genere)
@@ -276,7 +349,7 @@ def update_analysis(data_reel, data_genere, selected_col):
         if not df_sans_biais.empty:
             df_sans_biais["ratio"] = calcul_ratio(df_sans_biais, valeur_ref_gen)
             data_ref_current = dg_calc[dg_calc["ref"] == valeur_ref_gen].copy()
-            
+            print(selected_values)
             biais_step = biais_moyen(df_sans_biais, data_ref_current)
             biais_step["ref"] = valeur_ref_gen
             Biais_tot = pd.concat([Biais_tot, biais_step], ignore_index=True)
