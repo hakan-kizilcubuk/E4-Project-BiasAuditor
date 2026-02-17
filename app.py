@@ -140,7 +140,6 @@ def render_index():
      Output('column-checklist', 'value')],
     [Input('df_real_store', 'data')]
 )
-
 def update_checklist_options(data_reel):
     if not data_reel:
         return [], []
@@ -148,12 +147,12 @@ def update_checklist_options(data_reel):
     df = pd.DataFrame(data_reel)
     cols = df.columns.tolist()
     
-    # Création des options avec l'option "Aucun"
+    # Création des options
     options = [{'label': ' Aucun', 'value': 'none'}] + \
               [{'label': f' {c}', 'value': c} for c in cols]
     
-    # Par défaut, on sélectionne tout sauf 'none'
-    return options, cols
+    # MODIFICATION ICI : On renvoie ['none'] pour que seule cette case soit cochée au départ
+    return options, ['none']
 
 # CALLBACK POUR GÉRER LA LOGIQUE "AUCUN" ET RENVOYER LA LISTE
 @app.callback(
@@ -166,13 +165,22 @@ def update_checklist_options(data_reel):
 
 def handle_checklist_logic(selected_values):
     if not selected_values:
-        return []
+        return ['none'] # Si rien n'est coché, on remet "Aucun" par défaut
     
-    # Si "Aucun" vient d'être coché ou est présent
+    # Si l'utilisateur vient de cocher 'none' alors qu'il y avait d'autres colonnes
+    if 'none' in selected_values and len(selected_values) > 1:
+        # On garde 'none' et on vide le Store
+        return ['none']
+    
+    # Si l'utilisateur coche une colonne alors que 'none' était présent
+    if 'none' in selected_values and len(selected_values) > 1:
+        # On enlève 'none' de la liste visuelle
+        new_selection = [v for v in selected_values if v != 'none']
+        return new_selection, new_selection
+
+    # Cas standard : 'none' est seul ou absent
     if 'none' in selected_values:
-        # Si on a plusieurs valeurs et que l'une est 'none', on vide le reste
-        # (Logique : si on clique Aucun, ça désélectionne tout)
-        return []
+        return ['none']
     
     return selected_values
 
