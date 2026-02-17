@@ -10,9 +10,9 @@ import datetime
 # Importation de vos fonctions personnalisées
 from fonction_des_donné import (
     creation_de_ref, 
-    sélection_valeur_ref_gen, 
-    ratio, 
-    Biai_moyen, 
+    selection_valeur_ref_gen, 
+    calcul_ratio, 
+    biais_moyen, 
     moyenne_par_colone_référance,
     generate_pdf_report
 )
@@ -204,11 +204,11 @@ def download_report_callback(n_clicks, data_reel, data_genere):
     
     Biais_tot_local = pd.DataFrame()
     for val in dg_with_ref["ref"].unique():
-        sub_real = sélection_valeur_ref_gen(val, dr_with_ref.drop(nom_colone_ref, axis=1))
+        sub_real = selection_valeur_ref_gen(val, dr_with_ref.drop(nom_colone_ref, axis=1))
         if not sub_real.empty:
-            sub_real["ratio"] = ratio(sub_real, val)
+            sub_real["ratio"] = calcul_ratio(sub_real, val)
             data_ref_curr = dg_with_ref[dg_with_ref["ref"] == val].drop(nom_colone_ref, axis=1)
-            step = Biai_moyen(sub_real, data_ref_curr)
+            step = biais_moyen(sub_real, data_ref_curr)
             step["ref"] = val
             Biais_tot_local = pd.concat([Biais_tot_local, step], ignore_index=True)
     
@@ -271,13 +271,13 @@ def update_analysis(data_reel, data_genere, selected_col):
 
     # Calcul du biais pour chaque point de référence unique dans le généré
     for valeur_ref_gen in dg_calc["ref"].unique():
-        df_sans_biais = sélection_valeur_ref_gen(valeur_ref_gen, dr_calc)
+        df_sans_biais = selection_valeur_ref_gen(valeur_ref_gen, dr_calc)
         
         if not df_sans_biais.empty:
-            df_sans_biais["ratio"] = ratio(df_sans_biais, valeur_ref_gen)
+            df_sans_biais["ratio"] = calcul_ratio(df_sans_biais, valeur_ref_gen)
             data_ref_current = dg_calc[dg_calc["ref"] == valeur_ref_gen].copy()
             
-            biais_step = Biai_moyen(df_sans_biais, data_ref_current)
+            biais_step = biais_moyen(df_sans_biais, data_ref_current)
             biais_step["ref"] = valeur_ref_gen
             Biais_tot = pd.concat([Biais_tot, biais_step], ignore_index=True)
 
