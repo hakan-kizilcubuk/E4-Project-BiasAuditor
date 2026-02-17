@@ -14,55 +14,78 @@ from fpdf import FPDF
 import datetime
 
 
-def creation_de_ref(df, nom_colone):
+def creation_de_ref(df: pd.DataFrame, nom_colonne: str) -> pd.DataFrame:
+    """
+    Crée une colonne 'ref' basée sur une colonne existante.
+
+    Si la colonne est numérique, la valeur est copiée.
+    Sinon, un mapping ordinal est créé à partir des valeurs uniques triées.
+    """
     df = df.copy()
 
-    if pd.api.types.is_numeric_dtype(df[nom_colone]):
-        df["ref"] = df[nom_colone]
+    if pd.api.types.is_numeric_dtype(df[nom_colonne]):
+        df["ref"] = df[nom_colonne]
     else:
-        valeurs_uniques = sorted(df[nom_colone].dropna().unique())
+        valeurs_uniques = sorted(df[nom_colonne].dropna().unique())
         mapping = {val: i + 1 for i, val in enumerate(valeurs_uniques)}
-        df["ref"] = df[nom_colone].map(mapping)
+        df["ref"] = df[nom_colonne].map(mapping)
 
     return df
 
 
 
 
-def valeurs_les_plus_proches(df, nom_colonne, valeur_ref_2):
-    # Trie et extrait les valeurs uniques de la colonne
+def valeurs_les_plus_proches(
+    df: pd.DataFrame,
+    nom_colonne: str,
+    valeur_ref: float
+) -> pd.Series:
+    """
+    Retourne la valeur exacte si elle existe,
+    sinon les deux valeurs les plus proches (borne inf et sup).
+    """
     valeurs = df[nom_colonne].drop_duplicates().sort_values().values
 
-    # Cas où la valeur exacte existe
-    if valeur_ref_2 in valeurs:
-        return pd.Series([valeur_ref_2])
+    if valeur_ref in valeurs:
+        return pd.Series([valeur_ref])
 
-    # Sinon, cherche les deux bornes
-    inf = valeurs[valeurs < valeur_ref_2]
-    sup = valeurs[valeurs > valeur_ref_2]
 
-    # Récupère la plus grande valeur inférieure et la plus petite valeur supérieure
+    inf = valeurs[valeurs < valeur_ref]
+    sup = valeurs[valeurs > valeur_ref]
+
     borne_inf = inf[-1] if len(inf) > 0 else None
     borne_sup = sup[0] if len(sup) > 0 else None
 
-    # Retourne les bornes sous forme de Série (sans doublon)
     result = pd.Series([borne_inf, borne_sup]).dropna()
     return result
 
 
 
-def filtrer_lignes_par_liste_ref(df, liste_valeur_ref):
-    return df[df["ref"].isin(liste_valeur_ref)]
+def filtrer_lignes_par_liste_ref(
+    df: pd.DataFrame,
+    liste_valeurs_ref: pd.Series
+) -> pd.DataFrame:
+    """Filtre les lignes dont la colonne 'ref' appartient à une liste."""
+    return df[df["ref"].isin(liste_valeurs_ref)]
 
 
 
 
 
-def sélection_valeur_ref_gen(valeur_ref_gen, Data_real):
-    return(filtrer_lignes_par_liste_ref(Data_real, valeurs_les_plus_proches(Data_real,"ref",valeur_ref_gen)))
+def selection_valeur_ref_gen(
+    valeur_ref_gen: float,
+    data_real: pd.DataFrame
+) -> pd.DataFrame:
+    """Sélectionne les lignes correspondant aux valeurs de référence proches."""
+    valeurs_proches = valeurs_les_plus_proches(data_real, "ref", valeur_ref_gen)
+    return filtrer_lignes_par_liste_ref(data_real, valeurs_proches)
 
 
-def ratio(df, valeur_ref_gen):
+def calcul_ratio(df: pd.DataFrame, valeur_ref_gen: float) :
+    """
+    Calcule des poids normalisés (somme = 100)
+    selon la distance à une valeur de référence.
+    """
 
     if df.empty:
         return []
@@ -76,49 +99,50 @@ def ratio(df, valeur_ref_gen):
     
     poids_normalises = [int(round(100 * p / somme_poids)) for p in poids]
     
-    # Ajustement final seulement si la liste n'est pas vide
     if poids_normalises:
         poids_normalises[-1] += 100 - sum(poids_normalises)
         
     return poids_normalises
 
-def Biai_moyen(Data_sans_biai_gen, data_ref):
 
-    if "ratio" not in Data_sans_biai_gen.columns:
+
+def biais_moyen(
+    data_sans_biais: pd.DataFrame,
+    data_ref: pd.DataFrame
+) -> pd.DataFrame:
+    """
+    Calcule le biais moyen pondéré par la colonne 'ratio'
+    entre un jeu de données et une référence.
+    """
+
+    if "ratio" not in data_sans_biais.columns:
         raise ValueError("La colonne 'ratio' est absente de Data_sans_biai_gen")
 
-    ratio = Data_sans_biai_gen["ratio"]
-
+    ratio = data_sans_biais["ratio"]
     biais_absolus = {}
-
-    # Colonnes communes (sauf ratio)
     colonnes_communes = (
-        Data_sans_biai_gen.columns
+        data_sans_biais.columns
         .intersection(data_ref.columns)
         .difference(["ratio"])
     )
 
     for col in colonnes_communes:
-
-        # uniquement numérique
-        if not pd.api.types.is_numeric_dtype(Data_sans_biai_gen[col]):
+        
+        if not pd.api.types.is_numeric_dtype(data_sans_biais[col]):
             continue
 
-        # valeur de référence UNIQUE
         ref_val = data_ref[col].iloc[0]
 
-        # biais pondéré
         biais = (
-            (Data_sans_biai_gen[col] - ref_val) * ratio
+            (data_sans_biais[col] - ref_val) * ratio
         ).sum() / ratio.sum()
 
         biais_absolus[col] = abs(biais)
 
-    # sortie : 1 ligne, colonnes = variables
     return pd.DataFrame([biais_absolus])
     
 
-def moyenne_par_colone_référance(df):
+def moyenne_par_colone_référance(df: pd.DataFrame) -> pd.DataFrame:
     """
     Regroupe par 'nom_fichier_référance' 
     et calcule la moyenne de toutes les autres colonnes numériques.
