@@ -121,44 +121,29 @@ def calcul_ratio(df: pd.DataFrame, valeur_ref_gen: float):
 
 
 
-def biais_moyen(data_sans_biais, data_ref, df_reel_complet, df_gen_complet):
-    """
-    Calcule le pourcentage d'erreur (Fidélité) avec une logique adaptative :
-    - Erreur Relative pour les mesures à large échelle.
-    - Erreur Normalisée par l'étendue pour les catégories et petites valeurs.
-    """
+def biais_moyen(data_sans_biais, data_ref, df_reel_complet, df_gen_complet=None, methode='medical'):
     ratio = data_sans_biais["ratio"]
     resultats_final = {}
-    
-    # On identifie les colonnes communes (excluant les colonnes techniques)
     colonnes_communes = data_sans_biais.columns.intersection(data_ref.columns).difference(["ratio", "ref"])
 
     for col in colonnes_communes:
-        # 1. LA CIBLE : La valeur réelle de référence
         valeur_reelle_cible = data_ref[col].iloc[0]
-        
-        # 2. LA GÉNÉRATION : La valeur produite (Moyenne pondérée)
-        # Si calcul_ratio a trouvé un 'exact', cette valeur sera identique au réel.
         valeur_generee = (data_sans_biais[col] * ratio).sum() / ratio.sum()
-        
-        # 3. ANALYSE DE L'ÉCHELLE
         ecart_absolu = abs(valeur_reelle_cible - valeur_generee)
-        etendue_globale = df_reel_complet[col].max() - df_reel_complet[col].min()
         
-        # 4. CALCUL DU BIAIS ADAPTATIF
-        # On définit un seuil : si la valeur réelle est > 5% du max de la colonne, 
-        # on la considère comme une "grande valeur" nécessitant une erreur relative.
-        seuil_sensibilite = 0.05 * df_reel_complet[col].max()
-        
-        if abs(valeur_reelle_cible) > seuil_sensibilite:
-            # CAS GRANDE VALEUR : Erreur relative classique
-            # (Ex: Cholestérol, Rythme cardiaque)
-            erreur_pourcent = (ecart_absolu / abs(valeur_reelle_cible)) * 100
+        if methode == 'strict':
+            # Calcul sans pitié : Erreur relative pure
+            erreur_pourcent = (ecart_absolu / (abs(valeur_reelle_cible) + 1e-10)) * 100
         else:
-            # CAS PETITE VALEUR / CATÉGORIE : Normalisation par l'étendue
-            # (Ex: Sexe (0/1), FBS (0/1), CA (0-3))
-            # On divise par l'étendue pour savoir quel % de l'échelle totale l'erreur représente.
-            erreur_pourcent = (ecart_absolu / etendue_globale * 100) if etendue_globale != 0 else 0
+            # Calcul intelligent : Normalisation par l'étendue pour les petites valeurs
+            etendue_globale = df_reel_complet[col].max() - df_reel_complet[col].min()
+            moyenne_globale = abs(df_reel_complet[col].mean())
+            seuil = 0.1 * moyenne_globale
+            
+            if abs(valeur_reelle_cible) > seuil and etendue_globale > 1.0:
+                erreur_pourcent = (ecart_absolu / abs(valeur_reelle_cible)) * 100
+            else:
+                erreur_pourcent = (ecart_absolu / etendue_globale * 100) if etendue_globale > 0 else 0
             
         resultats_final[col] = erreur_pourcent
 
@@ -350,3 +335,12 @@ def generate_pdf_report(df_bias_final, nom_colone_reference="ref"):
 
     # Return PDF as bytes
     return pdf.output()
+
+
+
+
+
+
+
+
+
