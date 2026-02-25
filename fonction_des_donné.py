@@ -106,40 +106,32 @@ def calcul_ratio(df: pd.DataFrame, valeur_ref_gen: float) :
 
 
 
-def biais_moyen(
-    data_sans_biais: pd.DataFrame,
-    data_ref: pd.DataFrame
-) -> pd.DataFrame:
-    """
-    Calcule le biais moyen pondéré par la colonne 'ratio'
-    entre un jeu de données et une référence.
-    """
-
-    if "ratio" not in data_sans_biais.columns:
-        raise ValueError("La colonne 'ratio' est absente de Data_sans_biai_gen")
-
+def biais_moyen(data_sans_biais, data_ref, df_reel_complet, df_gen_complet):
     ratio = data_sans_biais["ratio"]
-    biais_absolus = {}
-    colonnes_communes = (
-        data_sans_biais.columns
-        .intersection(data_ref.columns)
-        .difference(["ratio"])
-    )
+    resultats_final = {}
+    
+    colonnes_communes = data_sans_biais.columns.intersection(data_ref.columns).difference(["ratio", "ref"])
 
     for col in colonnes_communes:
+        # 1. On prend la valeur de référence (Réelle)
+        valeur_reelle = data_ref[col].iloc[0]
         
-        if not pd.api.types.is_numeric_dtype(data_sans_biais[col]):
-            continue
+        # 2. On calcule la valeur générée moyenne (pondérée)
+        valeur_generee = (data_sans_biais[col] * ratio).sum() / ratio.sum()
+        
+        # 3. Calcul du Biais en % direct
+        # Formule : |Réel - Généré| / Moyenne_Réelle_Globale
+        moyenne_globale_reelle = df_reel_complet[col].mean()
+        
+        if moyenne_globale_reelle != 0:
+            # On exprime l'erreur locale par rapport à la grandeur globale de la variable
+            score = abs(valeur_reelle - valeur_generee) / moyenne_globale_reelle
+        else:
+            score = 0
+            
+        resultats_final[col] = score
 
-        ref_val = data_ref[col].iloc[0]
-
-        biais = (
-            (data_sans_biais[col] - ref_val) * ratio
-        ).sum() / ratio.sum()
-
-        biais_absolus[col] = abs(biais)
-
-    return pd.DataFrame([biais_absolus])
+    return pd.DataFrame([resultats_final])
     
 
 def moyenne_par_colone_référance(df: pd.DataFrame) -> pd.DataFrame:
