@@ -81,24 +81,39 @@ def selection_valeur_ref_gen(
     return filtrer_lignes_par_liste_ref(data_real, valeurs_proches)
 
 
-def calcul_ratio(df: pd.DataFrame, valeur_ref_gen: float) :
+def calcul_ratio(df: pd.DataFrame, valeur_ref_gen: float):
     """
-    Calcule des poids normalisés (somme = 100)
-    selon la distance à une valeur de référence.
+    Calcule des poids : 
+    1. Si correspondance exacte trouvée -> 100% sur l'exact.
+    2. Sinon -> Pondération par distance entre les voisins proches.
     """
-
     if df.empty:
         return []
 
     liste_ref = df['ref'].tolist()
     
+    # ÉTAPE 1 : Chercher s'il y a une valeur exacte
+    indices_exacts = [i for i, x in enumerate(liste_ref) if abs(x - valeur_ref_gen) < 1e-6]
+    
+    if indices_exacts:
+        # On donne tout le poids aux valeurs exactes (partagé si plusieurs)
+        poids = [0] * len(liste_ref)
+        valeur_partagee = 100 // len(indices_exacts)
+        for idx in indices_exacts:
+            poids[idx] = valeur_partagee
+        # Ajustement pour total = 100
+        poids[indices_exacts[-1]] += (100 - sum(poids))
+        return poids
+
+    # ÉTAPE 2 : Si pas d'exact, calcul par distance (Voisins proches)
     distances = [abs(x - valeur_ref_gen) for x in liste_ref]
+    # On ajoute 1e-10 pour éviter la division par zéro (sécurité)
+    poids_bruts = [1 / (d + 1e-10) for d in distances]
+    somme_poids = sum(poids_bruts)
     
-    poids = [1 / (d + 1e-10) for d in distances]
-    somme_poids = sum(poids)
+    poids_normalises = [int(round(100 * p / somme_poids)) for p in poids_bruts]
     
-    poids_normalises = [int(round(100 * p / somme_poids)) for p in poids]
-    
+    # Ajustement final pour que la somme soit exactement 100
     if poids_normalises:
         poids_normalises[-1] += 100 - sum(poids_normalises)
         
@@ -107,32 +122,47 @@ def calcul_ratio(df: pd.DataFrame, valeur_ref_gen: float) :
 
 
 def biais_moyen(data_sans_biais, data_ref, df_reel_complet, df_gen_complet):
+    """
+    Calcule le pourcentage d'erreur (Fidélité) avec une logique adaptative :
+    - Erreur Relative pour les mesures à large échelle.
+    - Erreur Normalisée par l'étendue pour les catégories et petites valeurs.
+    """
     ratio = data_sans_biais["ratio"]
     resultats_final = {}
     
+    # On identifie les colonnes communes (excluant les colonnes techniques)
     colonnes_communes = data_sans_biais.columns.intersection(data_ref.columns).difference(["ratio", "ref"])
 
     for col in colonnes_communes:
-        # 1. On prend la valeur de référence (Réelle)
-        valeur_reelle = data_ref[col].iloc[0]
+        # 1. LA CIBLE : La valeur réelle de référence
+        valeur_reelle_cible = data_ref[col].iloc[0]
         
-        # 2. On calcule la valeur générée moyenne (pondérée)
+        # 2. LA GÉNÉRATION : La valeur produite (Moyenne pondérée)
+        # Si calcul_ratio a trouvé un 'exact', cette valeur sera identique au réel.
         valeur_generee = (data_sans_biais[col] * ratio).sum() / ratio.sum()
         
-        # 3. Calcul du Biais en % direct
-        # Formule : |Réel - Généré| / Moyenne_Réelle_Globale
-        moyenne_globale_reelle = df_reel_complet[col].mean()
+        # 3. ANALYSE DE L'ÉCHELLE
+        ecart_absolu = abs(valeur_reelle_cible - valeur_generee)
+        etendue_globale = df_reel_complet[col].max() - df_reel_complet[col].min()
         
-        if moyenne_globale_reelle != 0:
-            # On exprime l'erreur locale par rapport à la grandeur globale de la variable
-            score = abs(valeur_reelle - valeur_generee) / moyenne_globale_reelle
+        # 4. CALCUL DU BIAIS ADAPTATIF
+        # On définit un seuil : si la valeur réelle est > 5% du max de la colonne, 
+        # on la considère comme une "grande valeur" nécessitant une erreur relative.
+        seuil_sensibilite = 0.05 * df_reel_complet[col].max()
+        
+        if abs(valeur_reelle_cible) > seuil_sensibilite:
+            # CAS GRANDE VALEUR : Erreur relative classique
+            # (Ex: Cholestérol, Rythme cardiaque)
+            erreur_pourcent = (ecart_absolu / abs(valeur_reelle_cible)) * 100
         else:
-            score = 0
+            # CAS PETITE VALEUR / CATÉGORIE : Normalisation par l'étendue
+            # (Ex: Sexe (0/1), FBS (0/1), CA (0-3))
+            # On divise par l'étendue pour savoir quel % de l'échelle totale l'erreur représente.
+            erreur_pourcent = (ecart_absolu / etendue_globale * 100) if etendue_globale != 0 else 0
             
-        resultats_final[col] = score
+        resultats_final[col] = erreur_pourcent
 
     return pd.DataFrame([resultats_final])
-    
 
 def moyenne_par_colone_référance(df: pd.DataFrame) -> pd.DataFrame:
     """
