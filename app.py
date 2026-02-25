@@ -24,14 +24,16 @@ BLEU_DARK = "#1e293b"
 ROSE_ALIA = "#d8627a"
 ROUGE_CRITIQUE = "#ef4444"
 VERT_VALIDE = "#10b981"
+ORANGE_MOYEN = "#f59e0b"
 GRIS_FOND = "#f8fafc"
 
 styles = {
     'nav': {'backgroundColor': BLEU_DARK, 'padding': '15px', 'display': 'flex', 'justifyContent': 'center', 'gap': '30px'},
     'nav_link': {'color': 'white', 'textDecoration': 'none', 'fontSize': '16px', 'fontWeight': '500'},
     'card_dashboard': {
-        'borderRadius': '12px', 'border': 'none', 'boxShadow': '0 4px 6px -1px rgb(0 0 0 / 0.1)',
-        'backgroundColor': 'white', 'padding': '20px', 'height': '100%', 'textAlign': 'center'
+        'borderRadius': '12px', 'boxShadow': '0 4px 6px -1px rgb(0 0 0 / 0.1)',
+        'backgroundColor': 'white', 'padding': '20px', 'height': '100%', 'textAlign': 'center',
+        'position': 'relative', 'border': '2px solid transparent' # Border par défaut
     },
     'menu_item': {
         'padding': '12px 20px', 'margin': '5px 0', 'borderRadius': '6px', 'cursor': 'pointer',
@@ -39,6 +41,10 @@ styles = {
     },
     'menu_item_selected': {
         'borderLeft': f'5px solid {ROSE_ALIA}', 'backgroundColor': '#fff1f2', 'color': ROSE_ALIA, 'fontWeight': 'bold'
+    },
+    'badge': {
+        'position': 'absolute', 'top': '10px', 'right': '10px', 'fontSize': '10px', 
+        'fontWeight': 'bold', 'padding': '2px 8px', 'borderRadius': '20px', 'color': 'white'
     }
 }
 
@@ -52,26 +58,20 @@ app.layout = html.Div([
     html.Div(id='page-content', style={'backgroundColor': GRIS_FOND, 'minHeight': '92vh'})
 ])
 
-# --- FONCTION GRAPHIQUE DONUT (MODIFIÉE POUR % ÉCART) ---
-def create_donut_chart(value):
-    """ 
-    Affiche l'écart en % par rapport à la moyenne globale.
-    Ex: value = 1.25 -> Affiche +25%
-    """
-    ecart_pourcent = (value - 1) * 100
-    color = VERT_VALIDE
-    if ecart_pourcent > 15: color = "#f59e0b"
-    if ecart_pourcent > 40: color = ROUGE_CRITIQUE
-    
-    # Texte d'affichage (Ajoute un '+' si positif)
-    display_text = f"{'+' if ecart_pourcent >= 0 else ''}{ecart_pourcent:.1f}%"
-    
-    # Pour le visuel du donut, on normalise l'affichage
-    fig = go.Figure(data=[go.Pie(values=[abs(ecart_pourcent), 100], hole=.75, 
-                                 marker_colors=[color, "#e2e8f0"], textinfo='none', hoverinfo='none')])
-    fig.update_layout(showlegend=False, height=140, margin=dict(l=5, r=5, t=5, b=5),
-        annotations=[dict(text=display_text, x=0.5, y=0.5, font_size=18, showarrow=False, font_weight="bold", font_color=color)],
-        paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
+# --- FONCTION GRAPHIQUE DONUT ---
+def create_donut_chart(ecart_pourcent, color):  
+    fig = go.Figure(data=[go.Pie(
+        values=[ecart_pourcent, max(0, 100 - ecart_pourcent)], 
+        hole=.75, 
+        marker_colors=[color, "#e2e8f0"], 
+        textinfo='none', 
+        hoverinfo='none'
+    )])
+    fig.update_layout(
+        showlegend=False, height=140, margin=dict(l=5, r=5, t=5, b=5),
+        annotations=[dict(text=f"{ecart_pourcent:.1f}%", x=0.5, y=0.5, font_size=18, showarrow=False, font_weight="bold", font_color=color)],
+        paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)'
+    )
     return fig
 
 # --- LOGIQUE D'IMPORTATION ---
@@ -94,7 +94,7 @@ def render_navbar(active_page="/"):
 def render_index():
     return dbc.Container([
         html.H2("Bias Auditor", className="text-center pt-5 fw-bold", style={'color': BLEU_DARK}),
-        html.P("Écart de biais par rapport à la moyenne globale (%)", className="text-center text-muted"),
+        html.P("Analyse de l'écart de biais absolu (%)", className="text-center text-muted"),
         dbc.Row([
             dbc.Col([
                 html.Label("📂 Fichier Réel", className="fw-bold"),
@@ -121,7 +121,7 @@ def render_graph_page():
         dbc.Row([
             dbc.Col(html.Div(style={**styles['card_dashboard'], 'marginTop': '30px', 'textAlign': 'left'}, children=[
                 html.H5("Évolution du Biais Relatif", className="fw-bold"),
-                html.P("0% signifie que le biais est égal à la moyenne. Un score positif indique un biais plus élevé que la normale.", className="text-muted small"),
+                html.P("Analyse temporelle/séquentielle de l'écart.", className="text-muted small"),
                 dcc.Dropdown(id='dropdown-colonne', className="my-3"),
                 dcc.Graph(id='graph-biais-unique')
             ]), width=12)
@@ -177,27 +177,41 @@ def handle_menu_click(n, current):
      Input('selected-columns-store', 'data'), Input('dropdown-colonne', 'value')]
 )
 def update_results(data_r, data_g, selected, drop_val):
-    if not data_r or not data_g or not selected: return [], go.Figure(), [], None
+    if not data_r or not data_g or not selected:
+        return [], go.Figure(), [], None
     
     df_r, df_g = pd.DataFrame(data_r), pd.DataFrame(data_g)
+    
+    # Pour l'audit, on utilise la première colonne (souvent 'age') comme référence
     ref_name = df_r.columns[0]
     
+    # Sélection des colonnes cibles (on retire la référence)
     if 'none' in selected:
         targets = [c for c in df_r.columns if c in df_g.columns and c != ref_name]
     else:
         targets = [c for c in selected if c in df_r.columns and c in df_g.columns and c != ref_name]
     
-    if not targets: return [], go.Figure(), [], None
+    if not targets:
+        return [], go.Figure(), [], None
 
     try:
+        # 1. Préparation des références
         dg_ref = creation_de_ref(df_g[[ref_name]+targets], ref_name)
         dr_ref = creation_de_ref(df_r[[ref_name]+targets], ref_name)
         
+        # 2. Calcul des scores de biais pour les cartes (Donuts)
         bt = pd.DataFrame()
+        comparison_list = [] # Pour stocker les moyennes de comparaison
+
         for v in dg_ref["ref"].unique():
-            sr = selection_valeur_ref_gen(v, dr_ref.drop(ref_name, axis=1))
+            # Trouver les correspondances dans le réel pour cette référence
+            sr = selection_valeur_ref_gen(v, dr_ref.drop(ref_name, axis=1)).copy()
+            
             if not sr.empty:
-                sr["ratio"] = calcul_ratio(sr, v)
+                # Calcul du ratio hybride (Exact ou Voisins)
+                sr.loc[:, "ratio"] = calcul_ratio(sr, v)
+                
+                # Calcul de l'erreur adaptative
                 step = biais_moyen(
                     data_sans_biais=sr, 
                     data_ref=dg_ref[dg_ref["ref"] == v].drop(ref_name, axis=1),
@@ -205,34 +219,81 @@ def update_results(data_r, data_g, selected, drop_val):
                     df_gen_complet=df_g
                 )
                 step["ref"] = v
-                bt = pd.concat([bt, step])
+                bt = pd.concat([bt, step], ignore_index=True)
+
+                # --- PRÉPARATION DES MOYENNES POUR LE GRAPHIQUE ---
+                real_rows = dr_ref[dr_ref["ref"] == v]
+                gen_rows = dg_ref[dg_ref["ref"] == v]
+                
+                row_stats = {"ref": v}
+                for col in targets:
+                    row_stats[f"{col}_Réel"] = real_rows[col].mean()
+                    row_stats[f"{col}_Généré"] = gen_rows[col].mean()
+                comparison_list.append(row_stats)
         
-        res = bt.groupby("ref", as_index=False).mean(numeric_only=True)
+        # Moyenne globale des erreurs pour les Donuts
+        res_errors = bt.groupby("ref", as_index=False).mean(numeric_only=True)
+        # DataFrame pour les courbes de comparaison
+        df_comp = pd.DataFrame(comparison_list).sort_values("ref")
+
     except Exception as e:
+        print(f"Erreur de calcul : {e}")
         return [], go.Figure(), [], None
 
-    cols = [c for c in res.columns if c != 'ref']
+    # --- GÉNÉRATION DES CARTES (DONUTS) ---
     cards = []
-    for c in cols:
-        val_moyenne = res[c].mean()
-        cards.append(dbc.Col(html.Div(style=styles['card_dashboard'], children=[
+    for c in targets:
+        val_erreur_moyenne = res_errors[c].mean() if c in res_errors.columns else 0
+        
+        if val_erreur_moyenne <= 15:
+            statut, color, border = "OK", VERT_VALIDE, "transparent"
+        elif val_erreur_moyenne <= 40:
+            statut, color, border = "MOYEN", ORANGE_MOYEN, "transparent"
+        else:
+            statut, color, border = "CRITIQUE", ROUGE_CRITIQUE, ROUGE_CRITIQUE
+        
+        cards.append(dbc.Col(html.Div(style={**styles['card_dashboard'], 'borderColor': border}, children=[
+            html.Span(statut, style={**styles['badge'], 'backgroundColor': color}),
             html.B(c, style={'color': BLEU_DARK}),
-            dcc.Graph(figure=create_donut_chart(val_moyenne), config={'displayModeBar': False}),
-            html.P("Écart vs Moyenne Globale", className="text-muted small")
+            dcc.Graph(figure=create_donut_chart(val_erreur_moyenne, color), config={'displayModeBar': False}),
+            html.P("Écart de Fidélité Moyen", className="text-muted small")
         ]), width=12, md=4))
 
-    d_val = drop_val if drop_val in cols else cols[0]
+    # --- GÉNÉRATION DU GRAPHIQUE LINÉAIRE COMPARATIF ---
+    d_val = drop_val if (drop_val and f"{drop_val}_Réel" in df_comp.columns) else targets[0]
     
-    # Transformation des données pour le graphique linéaire : (valeur - 1) * 100
-    res_plot = res.copy()
-    res_plot[d_val] = (res_plot[d_val] - 1) * 100
+    fig_line = go.Figure()
     
-    fig_line = px.line(res_plot, x="ref", y=d_val, markers=True, color_discrete_sequence=[ROSE_ALIA])
-    fig_line.add_hline(y=0, line_dash="dash", line_color=VERT_VALIDE, annotation_text="Moyenne Globale (0%)")
-    fig_line.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', 
-                           xaxis_title=f"Référence ({ref_name})", yaxis_title="Écart de Biais (%)")
-    
-    return cards, fig_line, [{'label': c, 'value': c} for c in cols], d_val
+    # Courbe RÉELLE (Vérité terrain)
+    fig_line.add_trace(go.Scatter(
+        x=df_comp["ref"], y=df_comp[f"{d_val}_Réel"],
+        mode='lines+markers', name='Réel (Source)',
+        line=dict(color=BLEU_DARK, width=3),
+        hovertemplate="Âge: %{x}<br>Réel: %{y:.2f}"
+    ))
 
+    # Courbe GÉNÉRÉE (Production IA)
+    fig_line.add_trace(go.Scatter(
+        x=df_comp["ref"], y=df_comp[f"{d_val}_Généré"],
+        mode='lines+markers', name='Généré (Synthétique)',
+        line=dict(color=ROSE_ALIA, width=3, dash='dash'),
+        hovertemplate="Âge: %{x}<br>Généré: %{y:.2f}"
+    ))
+
+    fig_line.update_layout(
+        title=f"Comparaison des distributions : {d_val}",
+        hovermode="x unified",
+        paper_bgcolor='rgba(0,0,0,0)', 
+        plot_bgcolor='rgba(0,0,0,0)', 
+        xaxis_title=f"Référence ({ref_name})", 
+        yaxis_title="Valeur Moyenne",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+    )
+    
+    # Ajout d'une grille légère pour la lisibilité
+    fig_line.update_xaxes(showgrid=True, gridwidth=1, gridcolor='#e2e8f0')
+    fig_line.update_yaxes(showgrid=True, gridwidth=1, gridcolor='#e2e8f0')
+    
+    return cards, fig_line, [{'label': c, 'value': c} for c in targets], d_val
 if __name__ == '__main__':
     app.run(debug=True)

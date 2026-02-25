@@ -320,12 +320,3 @@ def generate_pdf_report(df_bias_final, nom_colone_reference="ref"):
 
     # Return PDF as bytes
     return pdf.output()
-
-
-
-
-
-
-
-
-
