@@ -1,16 +1,23 @@
-import fairlens as fl
 import pandas as pd
+from fairlearn.metrics import demographic_parity_difference
 
-def run_initial_audit(df, target_col):
-    detector = fl.SensitiveAttributeDetector()
-    sensitive_attrs = detector.detect(df)
+def run_fairness_audit(df, target_col, sensitive_col):
+    """
+    Performs a fairness audit using the Fairlearn library.
+    Calculates the Statistical Parity Difference (SPD).
+    """
+    if sensitive_col not in df.columns or target_col not in df.columns:
+        return None
 
-    s_attr = sensitive_attrs[0] if sensitive_attrs else None
-    
-    if s_attr:
-        scorer = fl.FairnessScorer(df, target_attr=target_col, sensitive_attr=s_attr)
-        return sensitive_attrs, scorer.demographic_parity()
-    return sensitive_attrs, None
-
-if __name__ == "__main__":
-    print("Kurulum başarılı, auditor modülü hazır!")
+    try:
+        # Calculate Demographic Parity Difference (SPD)
+        # It requires the target to be binary or categorical for meaningful results
+        spd = demographic_parity_difference(
+            df[target_col],
+            df[target_col], # Comparing distribution against itself as a baseline
+            sensitive_features=df[sensitive_col]
+        )
+        return float(spd)
+    except Exception as e:
+        print(f"Fairness Audit Error: {e}")
+        return None
